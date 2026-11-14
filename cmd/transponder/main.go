@@ -67,12 +67,20 @@ func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
 }
 
+// noopUsageStore is a UsageStore that does nothing. Used for --config-test.
+type noopUsageStore struct{}
+
+func (noopUsageStore) RecordUsage(context.Context, store.UsageRecord) error { return nil }
+func (noopUsageStore) RecentUsage(context.Context, string, int) ([]store.UsageRecord, error) { return nil, nil }
+func (noopUsageStore) UsageSince(context.Context, string, time.Time, func(store.UsageRecord) error) error { return nil }
+
 func run(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("transponder", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	showVersion := fs.Bool("version", false, "print the version and exit")
 	configPath := fs.String("config", "", "path to the YAML config file")
 	checkUpdate := fs.Bool("check-update", false, "list newer releases, how urgent they are and which changes touch this config, then exit")
+	configTest := fs.Bool("config-test", false, "validate config and exit without starting the server")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -88,6 +96,22 @@ func run(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "transponder: %v\n", err)
 		return 1
+	}
+	if *configTest {
+		// Run the same validation as normal start: build router and limiter.
+		// This catches unknown provider types, missing base_url, bad routes,
+		// bad settings, and limit config errors.
+		client := &http.Client{Transport: http.DefaultTransport.(*http.Transport).Clone()}
+		if _, err := buildRouter(cfg, client); err != nil {
+			_, _ = fmt.Fprintf(stderr, "transponder: %v\n", err)
+			return 1
+		}
+		if _, err := buildLimiter(context.Background(), cfg, &noopUsageStore{}, time.Now); err != nil {
+			_, _ = fmt.Fprintf(stderr, "transponder: %v\n", err)
+			return 1
+		}
+		_, _ = fmt.Fprintln(stdout, "transponder: config test passed")
+		return 0
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	go stopOnContextDone(ctx, stop)

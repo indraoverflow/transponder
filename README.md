@@ -94,6 +94,22 @@ transponder never updates itself. To see what a newer release changes before you
 transponder --check-update --config transponder.yaml
 ```
 
+```shell
+transponder --check-update --config transponder.yaml
+```
+
+## Config test
+
+CI pipelines and container entrypoints can validate a config before deploying it, the way `nginx -t` works:
+
+```shell
+transponder --config-test --config transponder.yaml
+```
+
+It loads the file with environment expansion and overrides, runs the same validation as a normal start (unknown provider types, missing `base_url`, bad routes, bad settings, limit config errors), builds the router and the limiter, and exits. It opens no listener, no database and makes no network call. On success it prints `transponder: config test passed` to stdout and exits 0. On failure it prints the error to stderr and exits 1. Without `--config` it checks the built-in defaults.
+
+
+
 It lists every release newer than the one running, says how urgent the update is (security fixes, breaking changes, bug fixes or new features) and puts first the changes that touch your config, such as a fix to a provider type you use. It only reads the public release list on GitHub.
 
 To get the same news in the logs, set `update_check: true` (or `TRANSPONDER_UPDATE_CHECK=true`). transponder then checks at start and once a day and logs one `update available` line with its urgency, how many releases behind it is and how many changes touch your config. It is off by default, and a failed check is only logged at debug level. You can also watch the repository for releases on GitHub, or let Dependabot or Renovate bump the image tag.

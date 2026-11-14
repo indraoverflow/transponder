@@ -4,6 +4,10 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+### Added
+
+- `--config-test` flag: validate a config file (or the built-in defaults) without starting the server. Loads the file with environment expansion, runs the same validation as a normal start, builds the router and the limiter, opens no listener, no database, makes no network call. Exits 0 with `transponder: config test passed` on success, exits 1 with error on stderr on failure.
+
 ## [0.2.4] - 2026-11-14
 
 ### Added

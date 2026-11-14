@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"os"
 	"bytes"
 	"context"
 	"fmt"
@@ -637,5 +638,140 @@ func TestBuildRouterCooldownSettings(t *testing.T) {
 	r.Report(p.Targets[0], false)
 	if p, _ = r.Plan("m"); p.Targets[0].Provider.Name() != "b" {
 		t.Fatalf("one failure did not cool the target with cooldown_failures 1: %+v", p)
+	}
+}
+
+
+func TestConfigTest(t *testing.T) {
+	tmp := t.TempDir()
+
+	validConfig := filepath.Join(tmp, "valid.yaml")
+	err := os.WriteFile(validConfig, []byte(`
+providers:
+  - name: echo
+    type: echo
+routes:
+  - match: "*"
+    targets:
+      - provider: echo
+`), 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name       string
+		args       []string
+		wantCode   int
+		wantStdout string
+		wantStderr string
+		checkNoDB  bool
+	}{
+		{
+			name:       "valid config",
+			args:       []string{"--config-test", "--config", validConfig},
+			wantCode:   0,
+			wantStdout: "transponder: config test passed",
+			checkNoDB:  true,
+		},
+		{
+			name:       "unknown provider type",
+			args:       []string{"--config-test", "--config", filepath.Join(tmp, "bad.yaml")},
+			wantCode:   1,
+			wantStderr: "unknown type",
+			checkNoDB:  true,
+		},
+		{
+			name:       "route uses missing provider",
+			args:       []string{"--config-test", "--config", filepath.Join(tmp, "missing.yaml")},
+			wantCode:   1,
+			wantStderr: "not declared",
+			checkNoDB:  true,
+		},
+		{
+			name:       "bad env override",
+			args:       []string{"--config-test", "--config", filepath.Join(tmp, "env.yaml")},
+			wantCode:   1,
+			wantStderr: "environment variables not set",
+			checkNoDB:  true,
+		},
+		{
+			name:       "defaults (no config file)",
+			args:       []string{"--config-test"},
+			wantCode:   0,
+			wantStdout: "transponder: config test passed",
+			checkNoDB:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Write test-specific configs
+			switch tt.name {
+			case "unknown provider type":
+				err := os.WriteFile(filepath.Join(tmp, "bad.yaml"), []byte(`
+providers:
+  - name: bad
+    type: nonexistent
+routes:
+  - match: "*"
+    targets:
+      - provider: bad
+`), 0644)
+				if err != nil {
+					t.Fatal(err)
+				}
+			case "route uses missing provider":
+				err := os.WriteFile(filepath.Join(tmp, "missing.yaml"), []byte(`
+providers:
+  - name: echo
+    type: echo
+routes:
+  - match: "*"
+    targets:
+      - provider: missing
+`), 0644)
+				if err != nil {
+					t.Fatal(err)
+				}
+			case "bad env override":
+				err := os.WriteFile(filepath.Join(tmp, "env.yaml"), []byte(`
+providers:
+  - name: oa
+    type: openai
+    api_key: ${THIS_VAR_DEFINITELY_DOES_NOT_EXIST_12345}
+routes:
+  - match: "*"
+    targets:
+      - provider: oa
+`), 0644)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			var stdout, stderr bytes.Buffer
+			code := run(tt.args, &stdout, &stderr)
+			if code != tt.wantCode {
+				t.Fatalf("exit code = %d, want %d (stdout: %s, stderr: %s)", code, tt.wantCode, stdout.String(), stderr.String())
+			}
+			if !strings.Contains(stdout.String(), tt.wantStdout) {
+				t.Fatalf("stdout = %q, want it to contain %q", stdout.String(), tt.wantStdout)
+			}
+			if !strings.Contains(stderr.String(), tt.wantStderr) {
+				t.Fatalf("stderr = %q, want it to contain %q", stderr.String(), tt.wantStderr)
+			}
+			if tt.checkNoDB {
+				dbFiles, _ := filepath.Glob(filepath.Join(tmp, "*.db"))
+				if len(dbFiles) > 0 {
+					t.Fatalf("database file was created: %v", dbFiles)
+				}
+				// Also check current dir
+				dbFiles, _ = filepath.Glob("transponder*.db")
+				if len(dbFiles) > 0 {
+					t.Fatalf("database file was created in cwd: %v", dbFiles)
+				}
+			}
+		})
 	}
 }
